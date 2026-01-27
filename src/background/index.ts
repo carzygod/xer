@@ -1,0 +1,311 @@
+
+import { Settings, DEFAULT_SETTINGS, StoredTweet } from '../shared/types';
+import { generateReply } from '../services/ai';
+import { StorageService } from '../services/storage';
+
+// Background script state
+let isRunning = false;
+let settings: Settings = DEFAULT_SETTINGS;
+
+// Initialize state from storage
+chrome.storage.local.get(['isRunning', 'settings'], (result) => {
+    if (result.isRunning !== undefined) isRunning = result.isRunning;
+    if (result.settings) settings = result.settings;
+});
+
+// Timers
+let timers: { [key: string]: ReturnType<typeof setTimeout> } = {};
+
+function clearTimers() {
+    Object.values(timers).forEach(t => clearTimeout(t));
+    timers = {};
+}
+
+function getRandomDelay(min: number, max: number) {
+    return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
+}
+
+// Enable Side Panel opening on action click
+// @ts-ignore
+if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+        .catch((error) => console.error(error));
+}
+
+let activeTabId: number | null = null;
+
+// Listen for messages from Side Panel
+chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'START_TASK') {
+        // Update local settings if provided
+        if (message.settings) {
+            settings = message.settings;
+            chrome.storage.local.set({ settings });
+        }
+
+        const urlToOpen = settings.targetUrl;
+
+        // 1. Update state
+        isRunning = true;
+
+        // 2. Persist state
+        chrome.storage.local.set({ isRunning: true });
+
+        // 3. Open the target URL
+        chrome.tabs.create({ url: urlToOpen, active: true }, (tab) => {
+            if (tab.id) activeTabId = tab.id;
+        });
+
+
+        console.log('Task started with settings:', settings);
+
+        // Start scheduler loop
+        scheduleNextAction();
+    }
+    else if (message.type === 'PAUSE_TASK') {
+        // 1. Update state
+        isRunning = false;
+
+        // 2. Persist state
+        chrome.storage.local.set({ isRunning: false });
+
+        // Clear any pending timers
+        clearTimers();
+
+        console.log('Task paused. isRunning:', isRunning);
+    }
+    else if (message.type === 'TEST_SCROLL') {
+        performScrollAndScan(true);
+    }
+    else if (message.type === 'TEST_LIKE') {
+        performLike(true);
+    }
+    else if (message.type === 'TEST_REPLY') {
+        performReply(true);
+    }
+    else if (message.type === 'TEST_RETWEET') {
+        performRetweet(true);
+    }
+});
+
+function scheduleNextAction() {
+    if (!isRunning) return;
+
+    // SCROLL
+    if (!timers['scroll']) {
+        const scrollDelay = getRandomDelay(settings.intervals.scroll.min, settings.intervals.scroll.max);
+        console.log(`Scheduling scroll in ${scrollDelay / 1000}s`);
+        timers['scroll'] = setTimeout(() => performScrollAndScan(), scrollDelay);
+    }
+
+    // LIKE
+    if (!timers['like']) {
+        const likeDelay = getRandomDelay(settings.intervals.like.min, settings.intervals.like.max);
+        console.log(`Scheduling like in ${likeDelay / 1000}s`);
+        timers['like'] = setTimeout(() => performLike(), likeDelay);
+    }
+
+    // REPLY
+    if (!timers['reply']) {
+        const replyDelay = getRandomDelay(settings.intervals.reply.min, settings.intervals.reply.max);
+        console.log(`Scheduling reply in ${replyDelay / 1000}s`);
+        timers['reply'] = setTimeout(() => performReply(), replyDelay);
+    }
+
+    // RETWEET
+    if (!timers['retweet']) {
+        const retweetDelay = getRandomDelay(settings.intervals.retweet.min, settings.intervals.retweet.max);
+        console.log(`Scheduling retweet in ${retweetDelay / 1000}s`);
+        timers['retweet'] = setTimeout(() => performRetweet(), retweetDelay);
+    }
+}
+
+async function getTargetTab(isTest: boolean): Promise<number | null> {
+    if (!isTest && activeTabId !== null) return activeTabId;
+    if (isTest) {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs.length > 0 && tabs[0].id) return tabs[0].id;
+    }
+    return activeTabId;
+}
+
+async function performScrollAndScan(isTest = false) {
+    if (!isTest) delete timers['scroll'];
+    if (!isRunning && !isTest) return;
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    console.log('Executing: SCROLL' + (isTest ? ' (TEST)' : ''));
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCROLL' });
+
+    // Scan after scroll settles
+    setTimeout(() => {
+        if ((!isRunning && !isTest) || !targetTabId) return;
+        chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+            if (response && response.tweets) {
+                await StorageService.addToPool(response.tweets);
+            }
+        });
+    }, 2000);
+
+    // Reschedule
+    if (!isTest) scheduleNextAction();
+}
+
+async function performLike(isTest = false) {
+    if (!isTest) delete timers['like'];
+    if (!isRunning && !isTest) return;
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    console.log('Executing: LIKE attempt' + (isTest ? ' (TEST)' : ''));
+
+    // 1. Scan currently visible tweets
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+        if (!response || !response.tweets || response.tweets.length === 0) {
+            console.log('No visible tweets found for Like.');
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        const candidates: StoredTweet[] = response.tweets;
+        let target: StoredTweet | null = null;
+
+        // 2. Find first valid candidate
+        for (const cand of candidates) {
+            const check = await StorageService.canInteract('like', settings.dailyLimits, cand.id);
+            if (check.allowed || isTest) { // Allow in test mode even if limited (or maybe we want to test limits too? let's override for test)
+                target = cand;
+                break;
+            } else {
+                console.log(`Skipping candidate ${cand.id}: ${check.reason}`);
+            }
+        }
+
+        if (!target) {
+            console.log('No valid candidates (all liked or limited).');
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        // 3. Execute immediately
+        console.log(`Attempting to Like: ${target.id}`);
+        chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_LIKE', tweetId: target.id }, async (res) => {
+            if (res && res.success) {
+                await StorageService.recordInteraction('like', target!.id);
+                console.log('Like Success');
+            } else {
+                console.log('Like Failed');
+            }
+            if (!isTest) scheduleNextAction();
+        });
+    });
+}
+
+async function performReply(isTest = false) {
+    if (!isTest) delete timers['reply'];
+    if (!isRunning && !isTest) return;
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    if (!settings.ai.apiKey) {
+        console.log('Skipping Reply: No API Key');
+        if (!isTest) scheduleNextAction();
+        return;
+    }
+
+    console.log('Executing: REPLY attempt' + (isTest ? ' (TEST)' : ''));
+
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+        if (!response || !response.tweets || response.tweets.length === 0) {
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        const candidates: StoredTweet[] = response.tweets;
+        let target: StoredTweet | null = null;
+
+        for (const cand of candidates) {
+            // Skip ads or unrelated if possible (future improvement)
+            const check = await StorageService.canInteract('reply', settings.dailyLimits, cand.id);
+            if (check.allowed || isTest) {
+                target = cand;
+                break;
+            }
+        }
+
+        if (!target) {
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        console.log(`Attempting to Reply to: ${target.id}`);
+        try {
+            const replyText = await generateReply("Reply kindly", target.text, settings.ai);
+
+            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
+                if (res && res.success) {
+                    await StorageService.recordInteraction('reply', target!.id);
+                    console.log('Reply Success');
+                } else {
+                    console.log('Reply Failed');
+                    if (isTest) chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: 'Reply Failed: Page interaction error' });
+                }
+                if (!isTest) scheduleNextAction();
+            });
+        } catch (e: any) {
+            console.error('Reply Generation failed:', e);
+            if (isTest) chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e.message || 'Reply Generation Failed' });
+            if (!isTest) scheduleNextAction();
+        }
+    });
+}
+
+async function performRetweet(isTest = false) {
+    if (!isTest) delete timers['retweet'];
+    if (!isRunning && !isTest) return;
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    console.log('Executing: RETWEET attempt' + (isTest ? ' (TEST)' : ''));
+
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+        if (!response || !response.tweets || response.tweets.length === 0) {
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        const candidates: StoredTweet[] = response.tweets;
+        let target: StoredTweet | null = null;
+
+        for (const cand of candidates) {
+            const check = await StorageService.canInteract('retweet', settings.dailyLimits, cand.id);
+            if (check.allowed || isTest) {
+                target = cand;
+                break;
+            }
+        }
+
+        if (!target) {
+            if (!isTest) scheduleNextAction();
+            return;
+        }
+
+        console.log(`Attempting to Retweet: ${target.id}`);
+        chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_RETWEET', tweetId: target.id }, async (res) => {
+            if (res && res.success) {
+                await StorageService.recordInteraction('retweet', target!.id);
+                console.log('Retweet Success');
+            } else {
+                console.log('Retweet Failed');
+            }
+            if (!isTest) scheduleNextAction();
+        });
+    });
+}
+
+console.log('xer background script initialized');

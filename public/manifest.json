@@ -1,0 +1,43 @@
+{
+    "manifest_version": 3,
+    "name": "xer",
+    "version": "0.1.0",
+    "description": "X (Twitter) User Assistant",
+    "permissions": [
+        "storage",
+        "sidePanel",
+        "scripting",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "*://*/*"
+    ],
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    },
+    "action": {
+        "default_title": "Open xer Side Panel",
+        "default_icon": "logo.svg"
+    },
+    "icons": {
+        "128": "logo.svg"
+    },
+    "side_panel": {
+        "default_path": "src/sidepanel/index.html"
+    },
+    "options_page": "src/options/index.html",
+    "content_scripts": [
+        {
+            "matches": [
+                "https://x.com/*",
+                "https://twitter.com/*"
+            ],
+            "js": [
+                "content.js"
+            ]
+        }
+    ]
+}
