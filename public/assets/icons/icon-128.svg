@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+    <!-- Background: Solid Black Circle -->
+    <circle cx="64" cy="64" r="64" fill="#000000" />
+    
+    <!-- Outer Ring: Blue Automation Accent (Solid) -->
+    <circle cx="64" cy="64" r="58" stroke="#1d9bf0" stroke-width="4" fill="none" />
+
+    <!-- X Logo Stylized (White) -->
+    <g transform="translate(36, 36) scale(2.3)">
+        <path fill="#ffffff" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zl-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+    </g>
+</svg>

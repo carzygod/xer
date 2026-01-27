@@ -20,13 +20,13 @@
     },
     "action": {
         "default_title": "Open xer Side Panel",
-        "default_icon": "logo.svg"
+        "default_icon": "assets/icons/icon-48.png"
     },
     "icons": {
-        "16": "logo.svg",
-        "32": "logo.svg",
-        "48": "logo.svg",
-        "128": "logo.svg"
+        "16": "assets/icons/icon-16.png",
+        "32": "assets/icons/icon-32.png",
+        "48": "assets/icons/icon-48.png",
+        "128": "assets/icons/icon-128.png"
     },
     "side_panel": {
         "default_path": "src/sidepanel/index.html"

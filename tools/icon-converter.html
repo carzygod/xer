@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+    <script>
+        const svgData = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+            <circle cx="64" cy="64" r="64" fill="#000000" />
+            <circle cx="64" cy="64" r="58" stroke="#1d9bf0" stroke-width="4" fill="none" />
+            <g transform="translate(36, 36) scale(2.3)">
+                <path fill="#ffffff" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zl-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </g>
+        </svg>`;
+
+        function convert(size) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(svgBlob);
+
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = size;
+                    canvas.height = size;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, size, size);
+                    URL.revokeObjectURL(url);
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                img.src = url;
+            });
+        }
+
+        async function generate() {
+            const sizes = [16, 32, 48, 128];
+            const results = {};
+            for (const size of sizes) {
+                results[size] = await convert(size);
+            }
+            // Output results to a visible element or console for extraction
+            const pre = document.createElement('pre');
+            pre.id = 'output';
+            pre.textContent = JSON.stringify(results);
+            document.body.appendChild(pre);
+            console.log(JSON.stringify(results));
+        }
+
+        generate();
+    </script>
+</body>
+
+</html>
