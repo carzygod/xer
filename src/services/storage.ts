@@ -51,6 +51,8 @@ export class StorageService {
                 likes: 0,
                 replies: 0,
                 retweets: 0,
+                dms: 0,
+                mentions: 0,
                 interactedTweetIds: []
             };
             await chrome.storage.local.set({ [KEYS.HISTORY]: history });
@@ -59,7 +61,7 @@ export class StorageService {
         return history;
     }
 
-    static async canInteract(type: 'like' | 'reply' | 'retweet', limits: Settings['dailyLimits'], tweetId: string): Promise<{ allowed: boolean, reason?: string }> {
+    static async canInteract(type: 'like' | 'reply' | 'retweet' | 'dm' | 'mention', limits: Settings['dailyLimits'], tweetId: string): Promise<{ allowed: boolean, reason?: string }> {
         const history = await this.getHistory();
 
         if (history.interactedTweetIds.includes(tweetId)) {
@@ -72,6 +74,8 @@ export class StorageService {
         if (type === 'like') { current = history.likes; limit = limits.like; }
         else if (type === 'reply') { current = history.replies; limit = limits.reply; }
         else if (type === 'retweet') { current = history.retweets; limit = limits.retweet; }
+        else if (type === 'dm') { current = history.dms; limit = limits.dm; }
+        else if (type === 'mention') { current = history.mentions; limit = limits.mention; }
 
         if (current >= limit) {
             return { allowed: false, reason: `Daily limit reached` };
@@ -80,13 +84,15 @@ export class StorageService {
         return { allowed: true };
     }
 
-    static async recordInteraction(type: 'like' | 'reply' | 'retweet', tweetId: string): Promise<void> {
+    static async recordInteraction(type: 'like' | 'reply' | 'retweet' | 'dm' | 'mention', tweetId: string): Promise<void> {
         const history = await this.getHistory();
         history.interactedTweetIds.push(tweetId);
 
         if (type === 'like') history.likes++;
         else if (type === 'reply') history.replies++;
         else if (type === 'retweet') history.retweets++;
+        else if (type === 'dm') history.dms++;
+        else if (type === 'mention') history.mentions++;
 
         await chrome.storage.local.set({ [KEYS.HISTORY]: history });
     }

@@ -13,6 +13,17 @@ chrome.storage.local.get(['isRunning', 'settings'], (result) => {
     if (result.settings) settings = result.settings;
 });
 
+// Listen for settings changes (Hot Reload)
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.settings) {
+        settings = changes.settings.newValue;
+        console.log('Settings updated hot:', settings);
+        if (isRunning) {
+            scheduleNextAction();
+        }
+    }
+});
+
 // Timers
 let timers: { [key: string]: ReturnType<typeof setTimeout> } = {};
 
@@ -86,6 +97,12 @@ chrome.runtime.onMessage.addListener((message) => {
     else if (message.type === 'TEST_RETWEET') {
         performRetweet(true);
     }
+    else if (message.type === 'TEST_DM') {
+        performCheckDms(true);
+    }
+    else if (message.type === 'TEST_MENTION') {
+        performCheckMentions(true);
+    }
 });
 
 function scheduleNextAction() {
@@ -118,6 +135,20 @@ function scheduleNextAction() {
         console.log(`Scheduling retweet in ${retweetDelay / 1000}s`);
         timers['retweet'] = setTimeout(() => performRetweet(), retweetDelay);
     }
+
+    // DM
+    if (!timers['dm'] && settings.autoReplyDms) {
+        const dmDelay = getRandomDelay(settings.intervals.dm.min, settings.intervals.dm.max);
+        console.log(`Scheduling DM check in ${dmDelay / 1000}s`);
+        timers['dm'] = setTimeout(() => performCheckDms(), dmDelay);
+    }
+
+    // MENTION
+    if (!timers['mention'] && settings.autoReplyMentions) {
+        const mentionDelay = getRandomDelay(settings.intervals.mention.min, settings.intervals.mention.max);
+        console.log(`Scheduling Mention check in ${mentionDelay / 1000}s`);
+        timers['mention'] = setTimeout(() => performCheckMentions(), mentionDelay);
+    }
 }
 
 async function getTargetTab(isTest: boolean): Promise<number | null> {
@@ -129,12 +160,30 @@ async function getTargetTab(isTest: boolean): Promise<number | null> {
     return activeTabId;
 }
 
+// Helper to navigate and wait if needed
+async function ensureNavigation(tabId: number, targetUrlPart: string): Promise<boolean> {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.url?.includes(targetUrlPart)) {
+        console.log(`Navigating to ${targetUrlPart}...`);
+        await chrome.tabs.update(tabId, { url: `https://x.com${targetUrlPart}` });
+        // Wait for load
+        await new Promise(r => setTimeout(r, 6000)); // Simple 6s wait
+        return true;
+    }
+    return true; // Already there
+}
+
 async function performScrollAndScan(isTest = false) {
     if (!isTest) delete timers['scroll'];
     if (!isRunning && !isTest) return;
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
+
+    // Ensure we are on home for scrolling? Or just scroll wherever?
+    // User expectation: Scroll main feed.
+    // If we moved to Messages, we should probably move back to Home for scrolling OR just skip scrolling if not on Home.
+    // For now: Just scroll wherever we are.
 
     console.log('Executing: SCROLL' + (isTest ? ' (TEST)' : ''));
     chrome.tabs.sendMessage(targetTabId, { type: 'SCROLL' });
@@ -176,7 +225,7 @@ async function performLike(isTest = false) {
         // 2. Find first valid candidate
         for (const cand of candidates) {
             const check = await StorageService.canInteract('like', settings.dailyLimits, cand.id);
-            if (check.allowed || isTest) { // Allow in test mode even if limited (or maybe we want to test limits too? let's override for test)
+            if (check.allowed || isTest) {
                 target = cand;
                 break;
             } else {
@@ -229,7 +278,6 @@ async function performReply(isTest = false) {
         let target: StoredTweet | null = null;
 
         for (const cand of candidates) {
-            // Skip ads or unrelated if possible (future improvement)
             const check = await StorageService.canInteract('reply', settings.dailyLimits, cand.id);
             if (check.allowed || isTest) {
                 target = cand;
@@ -252,7 +300,6 @@ async function performReply(isTest = false) {
                     console.log('Reply Success');
                 } else {
                     console.log('Reply Failed');
-                    if (isTest) chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: 'Reply Failed: Page interaction error' });
                 }
                 if (!isTest) scheduleNextAction();
             });
@@ -305,6 +352,163 @@ async function performRetweet(isTest = false) {
             }
             if (!isTest) scheduleNextAction();
         });
+    });
+}
+
+// Helper to return to target URL (e.g. Home) after separate page actions
+async function returnToTarget(tabId: number) {
+    if (activeTabId !== tabId) return; // Only if matching
+    const target = settings.targetUrl;
+    if (!target) return;
+
+    try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.url !== target && !tab.url?.includes('home')) { // Loose check for home
+            console.log(`Returning to target: ${target}`);
+            await chrome.tabs.update(tabId, { url: target });
+            await new Promise(r => setTimeout(r, 5000)); // Wait for feed load
+        }
+    } catch (e) {
+        console.error('Error returning to target:', e);
+    }
+}
+
+async function performCheckDms(isTest = false) {
+    if (!isTest) delete timers['dm'];
+    if ((!isRunning && !isTest) || !settings.autoReplyDms) {
+        if (!isTest) scheduleNextAction();
+        return;
+    }
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    // 1. Navigate to Messages
+    await ensureNavigation(targetTabId, '/messages');
+
+    console.log('Executing: DM CHECK' + (isTest ? ' (TEST)' : ''));
+
+    // 2. Scan for unread
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN_DMS' }, async (response) => {
+        if (!response || !response.unreadIndices || response.unreadIndices.length === 0) {
+            console.log('No unread DMs found.');
+            if (!isTest) {
+                await returnToTarget(targetTabId);
+                scheduleNextAction();
+            }
+            return;
+        }
+
+        // 3. Process first unread
+        const index = response.unreadIndices[0];
+
+        const interactionId = `dm_${Date.now()}`;
+
+        // Check limits
+        const check = await StorageService.canInteract('dm', settings.dailyLimits, interactionId);
+        if (!check.allowed && !isTest) {
+            console.log('DM Limit reached');
+            await returnToTarget(targetTabId);
+            scheduleNextAction();
+            return;
+        }
+
+        try {
+            // Generate reply (Generic for now, or we could fetch last message content if extended)
+            console.log(`Replying to DM index ${index}`);
+            const replyText = await generateReply("Reply formally to a direct message acknowledging receipt.", "New Message", settings.ai);
+
+            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_DM_REPLY', index, text: replyText }, async (res) => {
+                if (res && res.success) {
+                    await StorageService.recordInteraction('dm', interactionId);
+                    console.log('DM Reply Success');
+                } else {
+                    console.log('DM Reply Failed');
+                }
+                if (!isTest) {
+                    await returnToTarget(targetTabId);
+                    scheduleNextAction();
+                }
+            });
+        } catch (e) {
+            console.error('DM Reply Error', e);
+            if (!isTest) {
+                await returnToTarget(targetTabId);
+                scheduleNextAction();
+            }
+        }
+    });
+}
+
+async function performCheckMentions(isTest = false) {
+    if (!isTest) delete timers['mention'];
+    if ((!isRunning && !isTest) || !settings.autoReplyMentions) {
+        if (!isTest) scheduleNextAction();
+        return;
+    }
+
+    const targetTabId = await getTargetTab(isTest);
+    if (!targetTabId) return;
+
+    // 1. Navigate to Mentions
+    await ensureNavigation(targetTabId, '/notifications/mentions');
+
+    console.log('Executing: MENTION CHECK' + (isTest ? ' (TEST)' : ''));
+
+    // 2. Scan (reuse standard scan as it picks up articles)
+    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+        if (!response || !response.tweets || response.tweets.length === 0) {
+            console.log('No mentions found.');
+            if (!isTest) {
+                await returnToTarget(targetTabId);
+                scheduleNextAction();
+            }
+            return;
+        }
+
+        const candidates: StoredTweet[] = response.tweets;
+        let target: StoredTweet | null = null;
+
+        // 3. Find un-replied mention
+        for (const cand of candidates) {
+            const check = await StorageService.canInteract('mention', settings.dailyLimits, cand.id);
+            if (check.allowed || isTest) {
+                target = cand;
+                break;
+            }
+        }
+
+        if (!target) {
+            if (!isTest) {
+                await returnToTarget(targetTabId);
+                scheduleNextAction();
+            }
+            return;
+        }
+
+        console.log(`Attempting to Reply to Mention: ${target.id}`);
+        try {
+            const replyText = await generateReply("Reply kindly to a mention", target.text, settings.ai);
+
+            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
+                if (res && res.success) {
+                    await StorageService.recordInteraction('mention', target!.id);
+                    console.log('Mention Reply Success');
+                } else {
+                    console.log('Mention Reply Failed');
+                }
+                if (!isTest) {
+                    await returnToTarget(targetTabId);
+                    scheduleNextAction();
+                }
+            });
+        } catch (e: any) {
+            console.error(e);
+            if (!isTest) {
+                await returnToTarget(targetTabId);
+                scheduleNextAction();
+            }
+        }
     });
 }
 

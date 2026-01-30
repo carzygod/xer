@@ -13,7 +13,22 @@ function App() {
     // Load stats/settings
     useEffect(() => {
         chrome.storage.local.get(['settings', 'isRunning'], (result) => {
-            if (result.settings) setSettings({ ...DEFAULT_SETTINGS, ...result.settings });
+            if (result.settings) {
+                // deep merge intervals to ensure new keys (dm, mention) are present
+                const mergedSettings = {
+                    ...DEFAULT_SETTINGS,
+                    ...result.settings,
+                    intervals: {
+                        ...DEFAULT_SETTINGS.intervals,
+                        ...(result.settings.intervals || {})
+                    },
+                    dailyLimits: {
+                        ...DEFAULT_SETTINGS.dailyLimits,
+                        ...(result.settings.dailyLimits || {})
+                    }
+                };
+                setSettings(mergedSettings);
+            }
             if (result.isRunning !== undefined) setIsRunning(result.isRunning);
         });
 
@@ -154,8 +169,28 @@ function App() {
                         />
                     </div>
 
+                    <h3>{t.sect_features}</h3>
+                    <div className="form-group checkbox-group" style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
+                        <input
+                            type="checkbox"
+                            checked={settings.autoReplyDms}
+                            onChange={(e) => saveSettings({ ...settings, autoReplyDms: e.target.checked })}
+                            style={{ marginRight: '8px' }}
+                        />
+                        <label style={{ marginBottom: 0 }}>{t.lbl_auto_reply_dms}</label>
+                    </div>
+                    <div className="form-group checkbox-group" style={{ display: 'flex', alignItems: 'center', marginBottom: '20px' }}>
+                        <input
+                            type="checkbox"
+                            checked={settings.autoReplyMentions}
+                            onChange={(e) => saveSettings({ ...settings, autoReplyMentions: e.target.checked })}
+                            style={{ marginRight: '8px' }}
+                        />
+                        <label style={{ marginBottom: 0 }}>{t.lbl_auto_reply_mentions}</label>
+                    </div>
+
                     <h3>{t.sect_intervals}</h3>
-                    {['scroll', 'like', 'reply', 'retweet'].map((key) => (
+                    {['scroll', 'like', 'reply', 'retweet', 'dm', 'mention'].map((key) => (
                         <div key={key} className="form-group interval-group">
                             <label>{t[`lbl_${key}_interval` as keyof typeof t]}</label>
                             <div className="interval-inputs">
@@ -211,6 +246,12 @@ function App() {
                         </button>
                         <button onClick={() => chrome.runtime.sendMessage({ type: 'TEST_RETWEET' })} className="btn-secondary">
                             {t.btn_test_retweet}
+                        </button>
+                        <button onClick={() => chrome.runtime.sendMessage({ type: 'TEST_DM' })} className="btn-secondary">
+                            {t.btn_test_dm}
+                        </button>
+                        <button onClick={() => chrome.runtime.sendMessage({ type: 'TEST_MENTION' })} className="btn-secondary">
+                            {t.btn_test_mention}
                         </button>
                     </div>
                 </div>

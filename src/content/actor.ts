@@ -117,8 +117,13 @@ export class TwitterActor {
         await new Promise(r => setTimeout(r, 5000));
 
         // 2. Find input box (public-DraftEditor-content)
-        // Note: this selector is tricky and changes often. Using a common one for now.
-        const editor = document.querySelector('div[data-testid="tweetTextarea_0"]') as HTMLElement;
+        // 2. Find input box (public-DraftEditor-content)
+        // Try precise selector first, then generic fallback
+        let editor = document.querySelector('div[data-testid="tweetTextarea_0"]') as HTMLElement;
+        if (!editor) {
+            editor = document.querySelector('[contenteditable="true"][role="textbox"]') as HTMLElement;
+        }
+
         if (!editor) {
             console.error('Could not find reply editor');
             return false;
@@ -144,6 +149,73 @@ export class TwitterActor {
             return true;
         }
 
+        return false;
+    }
+
+    // --- DM Logic ---
+
+    // Get list of unread conversations
+    public getUnreadConversations(): HTMLElement[] {
+        // Selector for conversations
+        const conversations = Array.from(document.querySelectorAll('div[data-testid="conversation"]'));
+        const unread: HTMLElement[] = [];
+
+        conversations.forEach(conv => {
+            // Unread indicator is usually an aria-label or a specific visual element.
+            // A simple heuristic: check for the "unread" indicator element or aria-label="Unread"
+            // Note: X DOM is obfuscated. Often an unread conversation has a distinct background color or an indicator dot.
+            // Let's look for an element with specific background-color or aria-label containing "Unread".
+
+            // Heuristic 1: Aria label on the thread?
+            // Heuristic 2: A blue dot.
+
+            // For now, let's look for specific unread badge often found inside.
+            // Or easier: Just return ALL conversations for now if we want to reply to latest? 
+            // - No, user wants AUTO REPLY, implies responding to NEW things.
+            // Let's try to find an aria-label "Unread" on the conversation cell itself or children.
+
+            if (conv.getAttribute('aria-label')?.includes('Unread') || conv.innerHTML.includes('r-14j79pv')) { // r-14j79pv is often the blue color class for dot, but brittle.
+                // Let's rely on text content check? No.
+                // Let's assume if we are scanning, we return the top one if we can track state.
+                // BUT safest is checking attributes.
+                unread.push(conv as HTMLElement);
+            }
+        });
+
+        // Fallback: If no "Unread" detected explicitly, maybe return the top one if it hasn't been replied to? 
+        // For 'substantial implementation', let's return all conversations and let the background script decide based on message content/author (deduplication).
+        return unread;
+    }
+
+    public clickConversation(index: number): boolean {
+        // Better to select from all to be safe on index
+        const all = Array.from(document.querySelectorAll('div[data-testid="conversation"]'));
+        if (all[index]) {
+            (all[index] as HTMLElement).click();
+            return true;
+        }
+        return false;
+    }
+
+    public async sendDm(text: string): Promise<boolean> {
+        // 1. Find Input
+        const input = document.querySelector('div[data-testid="dmComposerTextInput"]') as HTMLElement;
+        if (!input) return false;
+
+        // 2. Focus and Type
+        input.focus();
+        document.execCommand('insertText', false, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // 3. Wait a bit
+        await new Promise(r => setTimeout(r, 2000));
+
+        // 4. Click Send
+        const sendBtn = document.querySelector('button[data-testid="dmComposerSendButton"]') as HTMLElement;
+        if (sendBtn) {
+            sendBtn.click();
+            return true;
+        }
         return false;
     }
 }

@@ -22,6 +22,8 @@ export interface InteractionHistory {
     likes: number;
     replies: number;
     retweets: number;
+    dms: number;
+    mentions: number;
     interactedTweetIds: string[];
 }
 
@@ -33,13 +35,19 @@ export interface Settings {
         like: IntervalRange;
         reply: IntervalRange;
         retweet: IntervalRange;
+        dm: IntervalRange;
+        mention: IntervalRange;
     };
     dailyLimits: {
         like: number;
         reply: number;
         retweet: number;
+        dm: number;
+        mention: number;
     };
     ai: AISettings;
+    autoReplyDms: boolean;
+    autoReplyMentions: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -50,16 +58,22 @@ export const DEFAULT_SETTINGS: Settings = {
         like: { min: 60, max: 180 },
         reply: { min: 60, max: 180 },
         retweet: { min: 180, max: 600 },
+        dm: { min: 300, max: 900 },
+        mention: { min: 300, max: 900 },
     },
     dailyLimits: {
         like: 50,
         reply: 20,
-        retweet: 10
+        retweet: 10,
+        dm: 10,
+        mention: 10,
     },
     ai: {
         apiKey: '',
         apiUrl: 'https://api.openai.com/v1/chat/completions',
         model: 'gpt-4o-mini',
         embeddingsModel: 'text-embedding-3-small',
-    }
+    },
+    autoReplyDms: false,
+    autoReplyMentions: false,
 };
