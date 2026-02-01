@@ -1,5 +1,25 @@
 import { AISettings } from '../shared/types';
 
+type LanguageLabel = 'English' | 'Chinese' | 'Russian';
+
+function detectLanguageFromText(text: string): LanguageLabel | null {
+    if (!text) return null;
+    const trimmed = text.replace(/\s+/g, '');
+    if (!trimmed) return null;
+
+    if (/[\p{Han}]/u.test(trimmed)) {
+        return 'Chinese';
+    }
+    if (/[\p{Cyrillic}]/u.test(trimmed)) {
+        return 'Russian';
+    }
+    if (/[A-Za-z]/.test(trimmed)) {
+        return 'English';
+    }
+
+    return null;
+}
+
 export async function generateReply(
     prompt: string,
     tweetText: string,
@@ -9,12 +29,18 @@ export async function generateReply(
         throw new Error('No API Key provided');
     }
 
-    const systemPrompt = `You are a helpful social media assistant. 
-    Your task is to generate a short, friendly, and engaging reply to the following tweet.
-    Do not use hashtags. Keep it under 280 characters.
-    Tone: Casual, positive.
-    IMPORTANT: You MUST write your reply in the SAME LANGUAGE as the tweet text.
-    
+    const detectedLanguage = detectLanguageFromText(tweetText);
+    const enforcedLanguage = detectedLanguage ?? 'English';
+    const languageNote = detectedLanguage
+        ? `Tweet language detected: ${enforcedLanguage}.`
+        : 'Tweet language could not be detected; reply in English.';
+
+    const systemPrompt = `You are a helpful social media assistant who frames replies like a calm, fair-minded IT enthusiast.
+    Your task is to produce a concise, technical-facing answer that reads like a measured, objective response from someone who understands developer workflows.
+    You must match the language indicated by the tweet text. If the tweet only contains emoji or characters you cannot decode, respond in English.
+    ${languageNote}
+    Do not use hashtags, keep it under 280 characters, and avoid emotional exaggeration.
+
     Tweet: "${tweetText}"`;
 
     try {
@@ -28,7 +54,7 @@ export async function generateReply(
                 model: settings.model,
                 messages: [
                     { role: "system", content: systemPrompt },
-                    { role: "user", content: prompt || "Write a reply." } // In future we can pass custom instructions
+                    { role: "user", content: prompt || "Write a reply." }
                 ],
                 max_tokens: 100,
                 temperature: 0.7
@@ -46,6 +72,6 @@ export async function generateReply(
 
     } catch (error) {
         console.error('AI Service Error:', error);
-        throw error; // Re-throw to handle in background
+        throw error;
     }
 }

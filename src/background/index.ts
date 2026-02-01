@@ -305,7 +305,7 @@ async function performReply(isTest = false) {
             });
         } catch (e: any) {
             console.error('Reply Generation failed:', e);
-            if (isTest) chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e.message || 'Reply Generation Failed' });
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'Reply Generation Failed' });
             if (!isTest) scheduleNextAction();
         }
     });
@@ -432,6 +432,7 @@ async function performCheckDms(isTest = false) {
             });
         } catch (e) {
             console.error('DM Reply Error', e);
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'DM Reply Failed' });
             if (!isTest) {
                 await returnToTarget(targetTabId);
                 scheduleNextAction();
@@ -504,6 +505,7 @@ async function performCheckMentions(isTest = false) {
             });
         } catch (e: any) {
             console.error(e);
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'Mention Reply Failed' });
             if (!isTest) {
                 await returnToTarget(targetTabId);
                 scheduleNextAction();
