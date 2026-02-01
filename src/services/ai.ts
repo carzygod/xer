@@ -7,10 +7,10 @@ function detectLanguageFromText(text: string): LanguageLabel | null {
     const trimmed = text.replace(/\s+/g, '');
     if (!trimmed) return null;
 
-    if (/[\p{Han}]/u.test(trimmed)) {
+    if (/[\p{Script=Han}]/u.test(trimmed)) {
         return 'Chinese';
     }
-    if (/[\p{Cyrillic}]/u.test(trimmed)) {
+    if (/[\p{Script=Cyrillic}]/u.test(trimmed)) {
         return 'Russian';
     }
     if (/[A-Za-z]/.test(trimmed)) {

@@ -303,9 +303,9 @@ async function performReply(isTest = false) {
                 }
                 if (!isTest) scheduleNextAction();
             });
-        } catch (e: any) {
-            console.error('Reply Generation failed:', e);
-            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'Reply Generation Failed' });
+        } catch (error: unknown) {
+            console.error('Reply Generation failed:', error);
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: extractErrorMessage(error, 'Reply Generation Failed') });
             if (!isTest) scheduleNextAction();
         }
     });
@@ -373,6 +373,12 @@ async function returnToTarget(tabId: number) {
     }
 }
 
+function extractErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    return fallback;
+}
+
 async function performCheckDms(isTest = false) {
     if (!isTest) delete timers['dm'];
     if ((!isRunning && !isTest) || !settings.autoReplyDms) {
@@ -430,9 +436,9 @@ async function performCheckDms(isTest = false) {
                     scheduleNextAction();
                 }
             });
-        } catch (e) {
-            console.error('DM Reply Error', e);
-            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'DM Reply Failed' });
+        } catch (error: unknown) {
+            console.error('DM Reply Error', error);
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: extractErrorMessage(error, 'DM Reply Failed') });
             if (!isTest) {
                 await returnToTarget(targetTabId);
                 scheduleNextAction();
@@ -503,9 +509,9 @@ async function performCheckMentions(isTest = false) {
                     scheduleNextAction();
                 }
             });
-        } catch (e: any) {
-            console.error(e);
-            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: e?.message || 'Mention Reply Failed' });
+        } catch (error: unknown) {
+            console.error(error);
+            chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: extractErrorMessage(error, 'Mention Reply Failed') });
             if (!isTest) {
                 await returnToTarget(targetTabId);
                 scheduleNextAction();
