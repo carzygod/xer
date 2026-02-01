@@ -45,6 +45,19 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 
 let activeTabId: number | null = null;
 
+async function focusTab(tabId: number) {
+    try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.windowId !== undefined) {
+            await chrome.windows.update(tab.windowId, { focused: true });
+        }
+        await chrome.tabs.update(tabId, { active: true });
+        await new Promise((resolve) => setTimeout(resolve, 500)); // give UI time to focus
+    } catch (error) {
+        console.error('Failed to focus tab', error);
+    }
+}
+
 // Listen for messages from Side Panel
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_TASK') {
@@ -259,6 +272,7 @@ async function performReply(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
+    await focusTab(targetTabId);
 
     if (!settings.ai.apiKey) {
         console.log('Skipping Reply: No API Key');
@@ -388,6 +402,7 @@ async function performCheckDms(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
+    await focusTab(targetTabId);
 
     // 1. Navigate to Messages
     await ensureNavigation(targetTabId, '/messages');
@@ -456,6 +471,7 @@ async function performCheckMentions(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
+    await focusTab(targetTabId);
 
     // 1. Navigate to Mentions
     await ensureNavigation(targetTabId, '/notifications/mentions');
