@@ -51,16 +51,16 @@ chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
         }
     }
     else if (message.type === 'EXECUTE_REPLY') {
-        const tweets = actor.getVisibleTweets();
-        const target = tweets.find(t => t.id === message.tweetId);
-        if (target && message.text) {
-            actor.typeReply(target.element, message.text).then(success => {
+        (async () => {
+            const element = await actor.ensureTweetVisible(message.tweetId);
+            if (element && message.text) {
+                const success = await actor.typeReply(element, message.text);
                 sendResponse({ success });
-            });
-            return true;
-        } else {
-            sendResponse({ success: false, error: 'Tweet not found for reply' });
-        }
+            } else {
+                sendResponse({ success: false, error: 'Tweet not found or not ready for reply' });
+            }
+        })();
+        return true;
     }
     // --- DM HANDLERS ---
     else if (message.type === 'SCAN_DMS') {

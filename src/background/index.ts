@@ -45,19 +45,6 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 
 let activeTabId: number | null = null;
 
-async function focusTab(tabId: number) {
-    try {
-        const tab = await chrome.tabs.get(tabId);
-        if (tab.windowId !== undefined) {
-            await chrome.windows.update(tab.windowId, { focused: true });
-        }
-        await chrome.tabs.update(tabId, { active: true });
-        await new Promise((resolve) => setTimeout(resolve, 500)); // give UI time to focus
-    } catch (error) {
-        console.error('Failed to focus tab', error);
-    }
-}
-
 // Listen for messages from Side Panel
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_TASK') {
@@ -67,7 +54,7 @@ chrome.runtime.onMessage.addListener((message) => {
             chrome.storage.local.set({ settings });
         }
 
-        const urlToOpen = settings.targetUrl;
+const urlToOpen = settings.targetUrl;
 
         // 1. Update state
         isRunning = true;
@@ -76,9 +63,9 @@ chrome.runtime.onMessage.addListener((message) => {
         chrome.storage.local.set({ isRunning: true });
 
         // 3. Open the target URL
-        chrome.tabs.create({ url: urlToOpen, active: true }, (tab) => {
-            if (tab.id) activeTabId = tab.id;
-        });
+    chrome.tabs.create({ url: urlToOpen, active: true }, (tab) => {
+        if (tab.id) activeTabId = tab.id;
+    });
 
 
         console.log('Task started with settings:', settings);
@@ -164,13 +151,58 @@ function scheduleNextAction() {
     }
 }
 
+const ALLOWED_HOSTS = ['https://x.com', 'https://twitter.com'];
+
+function isAllowedUrl(url: string | undefined): boolean {
+    if (!url) return false;
+    return ALLOWED_HOSTS.some(host => url.startsWith(host));
+}
+
+async function isTabValid(tabId: number): Promise<boolean> {
+    try {
+        const tab = await chrome.tabs.get(tabId);
+        return isAllowedUrl(tab.url);
+    } catch {
+        return false;
+    }
+}
+
+async function findActiveXTab(): Promise<number | null> {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    for (const tab of tabs) {
+        if (tab.id && isAllowedUrl(tab.url)) {
+            return tab.id;
+        }
+    }
+
+    const fallbackTabs = await chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] });
+    for (const tab of fallbackTabs) {
+        if (tab.id) {
+            return tab.id;
+        }
+    }
+    return null;
+}
+
+async function refreshTargetTab(): Promise<number | null> {
+    if (activeTabId !== null && await isTabValid(activeTabId)) {
+        return activeTabId;
+    }
+
+    const foundId = await findActiveXTab();
+    activeTabId = foundId;
+    return foundId;
+}
+
 async function getTargetTab(isTest: boolean): Promise<number | null> {
-    if (!isTest && activeTabId !== null) return activeTabId;
     if (isTest) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs.length > 0 && tabs[0].id) return tabs[0].id;
+        if (tabs.length > 0 && tabs[0].id) {
+            return tabs[0].id;
+        }
+        return null;
     }
-    return activeTabId;
+    return await refreshTargetTab();
 }
 
 // Helper to navigate and wait if needed
@@ -272,7 +304,6 @@ async function performReply(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
-    await focusTab(targetTabId);
 
     if (!settings.ai.apiKey) {
         console.log('Skipping Reply: No API Key');
@@ -402,7 +433,6 @@ async function performCheckDms(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
-    await focusTab(targetTabId);
 
     // 1. Navigate to Messages
     await ensureNavigation(targetTabId, '/messages');
@@ -471,7 +501,6 @@ async function performCheckMentions(isTest = false) {
 
     const targetTabId = await getTargetTab(isTest);
     if (!targetTabId) return;
-    await focusTab(targetTabId);
 
     // 1. Navigate to Mentions
     await ensureNavigation(targetTabId, '/notifications/mentions');

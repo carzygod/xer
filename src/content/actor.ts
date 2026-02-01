@@ -52,6 +52,35 @@ export class TwitterActor {
         return tweets;
     }
 
+    public async ensureTweetVisible(tweetId: string): Promise<HTMLElement | null> {
+        const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
+        for (const article of articles) {
+            const timeLink = article.querySelector('time')?.closest('a');
+            const href = timeLink?.getAttribute('href');
+            if (href && href.includes(`/status/${tweetId}`)) {
+                (article as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                await new Promise(res => setTimeout(res, 500));
+                return article as HTMLElement;
+            }
+        }
+
+        // If not found, try to pull it into view by searching all anchors
+        const allLinks = Array.from(document.querySelectorAll('a[href*="/status/"]'));
+        for (const link of allLinks) {
+            const href = link.getAttribute('href');
+            if (href && href.includes(`/status/${tweetId}`)) {
+                const article = link.closest('article[data-testid="tweet"]') as HTMLElement | null;
+                if (article) {
+                    article.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    await new Promise(res => setTimeout(res, 500));
+                    return article;
+                }
+            }
+        }
+
+        return null;
+    }
+
     // Click Like button
     public async clickLike(element: HTMLElement): Promise<boolean> {
         const likeButton = element.querySelector('button[data-testid="like"]') as HTMLElement;
@@ -111,17 +140,28 @@ export class TwitterActor {
         const replyButton = element.querySelector('button[data-testid="reply"]') as HTMLElement;
         if (!replyButton) return false;
 
-        // 1. Click Reply to open modal/inline box
         replyButton.click();
-        console.log('Opened reply modal, waiting 5s...');
-        await new Promise(r => setTimeout(r, 5000));
+        console.log('Opened reply modal, waiting for editor...');
 
-        // 2. Find input box (public-DraftEditor-content)
-        // 2. Find input box (public-DraftEditor-content)
-        // Try precise selector first, then generic fallback
-        let editor = document.querySelector('div[data-testid="tweetTextarea_0"]') as HTMLElement;
-        if (!editor) {
-            editor = document.querySelector('[contenteditable="true"][role="textbox"]') as HTMLElement;
+        const selectorCandidates = [
+            'div[data-testid^="tweetTextarea"]',
+            '[contenteditable="true"][role="textbox"][aria-label*="Tweet"]',
+            '[contenteditable="true"][role="textbox"]'
+        ];
+
+        let editor: HTMLElement | null = null;
+        const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+        for (let attempt = 0; attempt < 12; attempt++) {
+            for (const selector of selectorCandidates) {
+                const candidate = document.querySelector(selector) as HTMLElement | null;
+                if (candidate && candidate.isContentEditable) {
+                    editor = candidate;
+                    break;
+                }
+            }
+            if (editor) break;
+            await wait(400);
         }
 
         if (!editor) {
