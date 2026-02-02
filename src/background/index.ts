@@ -45,6 +45,18 @@ if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
 
 let activeTabId: number | null = null;
 
+function sendMessageToTab(tabId: number, message: any, callback?: (response: any) => void, onError?: () => void) {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error(`Message ${message.type} failed:`, chrome.runtime.lastError.message);
+            activeTabId = null;
+            onError?.();
+            return;
+        }
+        callback?.(response);
+    });
+}
+
 // Listen for messages from Side Panel
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_TASK') {
@@ -231,12 +243,12 @@ async function performScrollAndScan(isTest = false) {
     // For now: Just scroll wherever we are.
 
     console.log('Executing: SCROLL' + (isTest ? ' (TEST)' : ''));
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCROLL' });
+    sendMessageToTab(targetTabId, { type: 'SCROLL' });
 
     // Scan after scroll settles
     setTimeout(() => {
         if ((!isRunning && !isTest) || !targetTabId) return;
-        chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+        sendMessageToTab(targetTabId, { type: 'SCAN' }, async (response) => {
             if (response && response.tweets) {
                 await StorageService.addToPool(response.tweets);
             }
@@ -257,7 +269,7 @@ async function performLike(isTest = false) {
     console.log('Executing: LIKE attempt' + (isTest ? ' (TEST)' : ''));
 
     // 1. Scan currently visible tweets
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+    sendMessageToTab(targetTabId, { type: 'SCAN' }, async (response) => {
         if (!response || !response.tweets || response.tweets.length === 0) {
             console.log('No visible tweets found for Like.');
             if (!isTest) scheduleNextAction();
@@ -286,13 +298,15 @@ async function performLike(isTest = false) {
 
         // 3. Execute immediately
         console.log(`Attempting to Like: ${target.id}`);
-        chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_LIKE', tweetId: target.id }, async (res) => {
+        sendMessageToTab(targetTabId, { type: 'EXECUTE_LIKE', tweetId: target.id }, async (res) => {
             if (res && res.success) {
                 await StorageService.recordInteraction('like', target!.id);
                 console.log('Like Success');
             } else {
                 console.log('Like Failed');
             }
+            if (!isTest) scheduleNextAction();
+        }, () => {
             if (!isTest) scheduleNextAction();
         });
     });
@@ -313,7 +327,7 @@ async function performReply(isTest = false) {
 
     console.log('Executing: REPLY attempt' + (isTest ? ' (TEST)' : ''));
 
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+    sendMessageToTab(targetTabId, { type: 'SCAN' }, async (response) => {
         if (!response || !response.tweets || response.tweets.length === 0) {
             if (!isTest) scheduleNextAction();
             return;
@@ -339,15 +353,17 @@ async function performReply(isTest = false) {
         try {
             const replyText = await generateReply("Reply kindly", target.text, settings.ai);
 
-            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
-                if (res && res.success) {
-                    await StorageService.recordInteraction('reply', target!.id);
-                    console.log('Reply Success');
-                } else {
-                    console.log('Reply Failed');
-                }
-                if (!isTest) scheduleNextAction();
-            });
+        sendMessageToTab(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
+            if (res && res.success) {
+                await StorageService.recordInteraction('reply', target!.id);
+                console.log('Reply Success');
+            } else {
+                console.log('Reply Failed');
+            }
+            if (!isTest) scheduleNextAction();
+        }, () => {
+            if (!isTest) scheduleNextAction();
+        });
         } catch (error: unknown) {
             console.error('Reply Generation failed:', error);
             chrome.runtime.sendMessage({ type: 'SHOW_ERROR', message: extractErrorMessage(error, 'Reply Generation Failed') });
@@ -365,7 +381,7 @@ async function performRetweet(isTest = false) {
 
     console.log('Executing: RETWEET attempt' + (isTest ? ' (TEST)' : ''));
 
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+    sendMessageToTab(targetTabId, { type: 'SCAN' }, async (response) => {
         if (!response || !response.tweets || response.tweets.length === 0) {
             if (!isTest) scheduleNextAction();
             return;
@@ -388,13 +404,15 @@ async function performRetweet(isTest = false) {
         }
 
         console.log(`Attempting to Retweet: ${target.id}`);
-        chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_RETWEET', tweetId: target.id }, async (res) => {
+        sendMessageToTab(targetTabId, { type: 'EXECUTE_RETWEET', tweetId: target.id }, async (res) => {
             if (res && res.success) {
                 await StorageService.recordInteraction('retweet', target!.id);
                 console.log('Retweet Success');
             } else {
                 console.log('Retweet Failed');
             }
+            if (!isTest) scheduleNextAction();
+        }, () => {
             if (!isTest) scheduleNextAction();
         });
     });
@@ -440,7 +458,7 @@ async function performCheckDms(isTest = false) {
     console.log('Executing: DM CHECK' + (isTest ? ' (TEST)' : ''));
 
     // 2. Scan for unread
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN_DMS' }, async (response) => {
+    sendMessageToTab(targetTabId, { type: 'SCAN_DMS' }, async (response) => {
         if (!response || !response.unreadIndices || response.unreadIndices.length === 0) {
             console.log('No unread DMs found.');
             if (!isTest) {
@@ -469,7 +487,7 @@ async function performCheckDms(isTest = false) {
             console.log(`Replying to DM index ${index}`);
             const replyText = await generateReply("Reply formally to a direct message acknowledging receipt.", "New Message", settings.ai);
 
-            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_DM_REPLY', index, text: replyText }, async (res) => {
+            sendMessageToTab(targetTabId, { type: 'EXECUTE_DM_REPLY', index, text: replyText }, async (res) => {
                 if (res && res.success) {
                     await StorageService.recordInteraction('dm', interactionId);
                     console.log('DM Reply Success');
@@ -479,6 +497,10 @@ async function performCheckDms(isTest = false) {
                 if (!isTest) {
                     await returnToTarget(targetTabId);
                     scheduleNextAction();
+                }
+            }, () => {
+                if (!isTest) {
+                    returnToTarget(targetTabId).then(() => scheduleNextAction());
                 }
             });
         } catch (error: unknown) {
@@ -508,7 +530,7 @@ async function performCheckMentions(isTest = false) {
     console.log('Executing: MENTION CHECK' + (isTest ? ' (TEST)' : ''));
 
     // 2. Scan (reuse standard scan as it picks up articles)
-    chrome.tabs.sendMessage(targetTabId, { type: 'SCAN' }, async (response) => {
+    sendMessageToTab(targetTabId, { type: 'SCAN' }, async (response) => {
         if (!response || !response.tweets || response.tweets.length === 0) {
             console.log('No mentions found.');
             if (!isTest) {
@@ -542,7 +564,7 @@ async function performCheckMentions(isTest = false) {
         try {
             const replyText = await generateReply("Reply kindly to a mention", target.text, settings.ai);
 
-            chrome.tabs.sendMessage(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
+            sendMessageToTab(targetTabId, { type: 'EXECUTE_REPLY', tweetId: target.id, text: replyText }, async (res) => {
                 if (res && res.success) {
                     await StorageService.recordInteraction('mention', target!.id);
                     console.log('Mention Reply Success');
@@ -552,6 +574,10 @@ async function performCheckMentions(isTest = false) {
                 if (!isTest) {
                     await returnToTarget(targetTabId);
                     scheduleNextAction();
+                }
+            }, () => {
+                if (!isTest) {
+                    returnToTarget(targetTabId).then(() => scheduleNextAction());
                 }
             });
         } catch (error: unknown) {
