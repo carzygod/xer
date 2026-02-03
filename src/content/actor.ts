@@ -144,6 +144,9 @@ export class TwitterActor {
         console.log('Opened reply modal, waiting for editor...');
 
         const selectorCandidates = [
+            'div[role="dialog"] div[data-testid^="tweetTextarea"]',
+            'div[role="dialog"] [contenteditable="true"][role="textbox"][aria-label*="Tweet"]',
+            'div[role="dialog"] [contenteditable="true"][role="textbox"]',
             'div[data-testid^="tweetTextarea"]',
             '[contenteditable="true"][role="textbox"][aria-label*="Tweet"]',
             '[contenteditable="true"][role="textbox"]'
@@ -178,9 +181,9 @@ export class TwitterActor {
         // 4. Dispatch events to be safe
         editor.dispatchEvent(new Event('input', { bubbles: true }));
 
-        console.log('Typed text, waiting 5s before sending...');
-        // 5. Wait for button enablement (User requested 5s delay after input)
-        await new Promise(r => setTimeout(r, 5000));
+        console.log('Typed text, waiting 15s before sending...');
+        // 5. Wait for button enablement (User requested 15s delay after input)
+        await new Promise(r => setTimeout(r, 15000));
 
         // 6. Click Tweet button (data-testid="tweetButton")
         const sendButton = document.querySelector('button[data-testid="tweetButton"]') as HTMLElement;
